@@ -1,0 +1,316 @@
+(function() {
+    // Pastikan skrip hanya berjalan sekali
+    if (window.autoSlasherInitialized) {
+        console.log("Auto Slasher sudah berjalan. Hentikan yang lama sebelum memulai yang baru.");
+        return; 
+    }
+    window.autoSlasherInitialized = true;
+
+    const fullScript = function() {
+        // Fungsi untuk mendapatkan area permainan
+        function getGameArea() {
+            const gameArea = document.querySelector('.game-area');
+            if (gameArea) return gameArea;
+
+            // Fallback (jika .game-area tidak ditemukan, seperti di skrip asli)
+            const gameAreasByBg = Array.from(document.querySelectorAll('*')).filter(el => {
+                try {
+                    const style = window.getComputedStyle(el);
+                    return style.backgroundImage.includes('play-bg.png');
+                } catch (e) {
+                    return false;
+                }
+            });
+            if (gameAreasByBg.length > 0) return gameAreasByBg[0];
+
+            const gameAreaByClass = document.querySelector('div[class*="mt-[10px]"][class*="w-[345px]"][class*="h-[487px]"]');
+            if (gameAreaByClass) return gameAreaByClass;
+
+            return {
+                getBoundingClientRect: () => ({
+                    left: (window.innerWidth - 345) / 2,
+                    top: (window.innerHeight - 487) / 2,
+                    width: 345,
+                    height: 487
+                })
+            };
+        }
+
+        // Membuat elemen penanda visual (dot)
+        const dot = document.createElement('div');
+        dot.style.cssText = `
+            position: fixed;
+            width: 5px;
+            height: 5px;
+            background-color: blue; /* Warna biru untuk dot deteksi */
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 10000;
+            transition: opacity 0.3s;
+        `;
+        document.body.appendChild(dot);
+
+        let isRunning = false;
+        let intervalId = null;
+
+        const savedInterval = localStorage.getItem('autoSlasherInterval') || '500'; // Interval lebih cepat
+        const savedState = localStorage.getItem('autoSlasherRunning') === 'true';
+        const savedPosition = JSON.parse(localStorage.getItem('autoSlasherPosition') || '{"top":"20px","right":"20px"}');
+
+        // Fungsi untuk mensimulasikan geseran (slash) di atas elemen
+        async function simulateSlashOnElement(element) {
+            const rect = element.getBoundingClientRect();
+            const startX = rect.left + rect.width / 4 + (Math.random() * rect.width / 2); // Mulai dari 1/4 hingga 3/4 lebar
+            const startY = rect.top + rect.height / 4 + (Math.random() * rect.height / 2); // Mulai dari 1/4 hingga 3/4 tinggi
+
+            // Tentukan titik akhir untuk membentuk garis slash diagonal
+            const endX = rect.left + rect.width / 4 + (Math.random() * rect.width / 2);
+            const endY = rect.top + rect.height / 4 + (Math.random() * rect.height / 2);
+
+            console.log(`Melakukan slash pada buah di (${startX.toFixed(0)}, ${startY.toFixed(0)})`);
+
+            // Tampilkan dot di titik awal
+            dot.style.left = startX + 'px';
+            dot.style.top = startY + 'px';
+            dot.style.opacity = '1';
+            dot.style.backgroundColor = 'blue'; // Pastikan biru saat memulai slash
+
+            // Memicu pointerdown/mousedown
+            element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: startX, clientY: startY }));
+            element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: startX, clientY: startY }));
+
+            await new Promise(resolve => setTimeout(resolve, 50)); // Jeda sebentar
+
+            // Mensimulasikan gerakan mouse (beberapa langkah)
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const currentX = startX + (endX - startX) * (i / steps);
+                const currentY = startY + (endY - startY) * (i / steps);
+
+                dot.style.left = currentX + 'px';
+                dot.style.top = currentY + 'px';
+
+                element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: currentX, clientY: currentY }));
+                await new Promise(resolve => setTimeout(resolve, 10)); // Jeda kecil antar gerakan
+            }
+
+            // Memicu pointerup/mouseup/click
+            element.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: endX, clientY: endY }));
+            element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: endX, clientY: endY }));
+            element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: endX, clientY: endY })); // Terkadang click juga diperlukan
+
+            await new Promise(resolve => setTimeout(resolve, 100)); // Jeda sebelum sembunyi dot
+            dot.style.opacity = '0';
+        }
+
+        const slasher = {
+            start: function(interval = 500) { // Default interval 500ms
+                if (isRunning) return;
+                isRunning = true;
+
+                localStorage.setItem('autoSlasherRunning', 'true');
+                localStorage.setItem('autoSlasherInterval', interval.toString());
+
+                intervalId = setInterval(async () => {
+                    try {
+                        // Cari semua elemen "orange" (buah)
+                        const oranges = document.querySelectorAll('.game-area .orange');
+                        
+                        if (oranges.length > 0) {
+                            // Ambil buah pertama yang ditemukan atau secara acak
+                            const targetOrange = oranges[Math.floor(Math.random() * oranges.length)];
+                            
+                            // Periksa apakah ini bom, jika ada elemen .bomb
+                            if (targetOrange && targetOrange.classList.contains('bomb')) {
+                                console.log("Mendeteksi bom, tidak melakukan slash.");
+                                // Opsional: Berhenti sebentar atau lakukan sesuatu untuk menghindari bom
+                                return; 
+                            }
+
+                            if (targetOrange) {
+                                await simulateSlashOnElement(targetOrange);
+                            }
+                        } else {
+                            // console.log("Tidak ada buah terdeteksi.");
+                        }
+                    } catch (e) {
+                        console.error('Kesalahan saat melakukan slash:', e);
+                    }
+                }, interval);
+            },
+
+            stop: function() {
+                if (!isRunning) return;
+                clearInterval(intervalId);
+                intervalId = null;
+                isRunning = false;
+                dot.style.opacity = '0';
+                localStorage.setItem('autoSlasherRunning', 'false');
+            }
+        };
+
+        // --- UI Control Panel ---
+        const controlPanel = document.createElement('div');
+        controlPanel.id = 'auto-slasher-panel'; // ID unik
+        controlPanel.style.cssText = `
+            position: fixed;
+            top: ${savedPosition.top || '20px'};
+            left: ${savedPosition.left || 'auto'};
+            right: ${!savedPosition.left ? (savedPosition.right || '20px') : 'auto'};
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px;
+            border-radius: 8px;
+            display: flex;
+            gap: 6px;
+            z-index: 10001;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            cursor: move;
+            user-select: none;
+        `;
+
+        const intervalInput = document.createElement('input');
+        intervalInput.type = 'number';
+        intervalInput.min = '100';
+        intervalInput.value = savedInterval;
+        intervalInput.style.cssText = `
+            width: 60px;
+            padding: 2px 4px;
+            border: 1px solid #666;
+            border-radius: 3px;
+            background: #333;
+            color: white;
+            text-align: center;
+            font-size: 12px;
+        `;
+
+        const toggleButton = document.createElement('button');
+        toggleButton.textContent = savedState ? 'Berhenti' : 'Mulai';
+        toggleButton.style.cssText = `
+            padding: 2px 8px;
+            border: none;
+            border-radius: 3px;
+            background: ${savedState ? '#f44336' : '#4CAF50'};
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 12px;
+        `;
+
+        const label = document.createElement('span');
+        label.textContent = 'ms';
+        label.style.cssText = `
+            color: white;
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+        `;
+
+        let isDragging = false;
+        let startPos = { x: 0, y: 0 };
+
+        controlPanel.onmousedown = (e) => {
+            if (e.target === controlPanel) {
+                isDragging = true;
+                startPos = {
+                    x: e.clientX - controlPanel.offsetLeft,
+                    y: e.clientY - controlPanel.offsetTop
+                };
+                e.preventDefault();
+            }
+        };
+
+        document.onmousemove = (e) => {
+            if (isDragging) {
+                const left = e.clientX - startPos.x;
+                const top = e.clientY - startPos.y;
+
+                controlPanel.style.left = left + 'px';
+                controlPanel.style.top = top + 'px';
+                controlPanel.style.right = 'auto';
+
+                localStorage.setItem('autoSlasherPosition', JSON.stringify({
+                    top: top + 'px',
+                    left: left + 'px'
+                }));
+            }
+        };
+
+        document.onmouseup = () => {
+            isDragging = false;
+        };
+
+        intervalInput.onmousedown = (e) => e.stopPropagation();
+        toggleButton.onmousedown = (e) => e.stopPropagation();
+
+        toggleButton.onclick = (e) => {
+            e.stopPropagation();
+            if (!isRunning) {
+                const interval = parseInt(intervalInput.value);
+                if (interval < 100) {
+                    alert('Interval tidak boleh kurang dari 100ms');
+                    return;
+                }
+                slasher.start(interval);
+                toggleButton.textContent = 'Berhenti';
+                toggleButton.style.background = '#f44336';
+            } else {
+                slasher.stop();
+                toggleButton.textContent = 'Mulai';
+                toggleButton.style.background = '#4CAF50';
+            }
+        };
+
+        controlPanel.appendChild(intervalInput);
+        controlPanel.appendChild(label);
+        controlPanel.appendChild(toggleButton);
+        document.body.appendChild(controlPanel);
+
+        if (savedState) {
+            slasher.start(parseInt(savedInterval));
+        }
+
+        return slasher;
+    };
+
+    // Simpan dan jalankan skrip
+    localStorage.setItem('autoSlasherScript', `(${fullScript.toString()})();`);
+    fullScript();
+
+    // Inisialisasi auto-reloader (dari skrip asli Anda)
+    function initAutoReloader() {
+        const detectVercelChallenge = () => {
+            const vercelScript = document.querySelector('script[src*="vercel/security"]');
+            if (vercelScript) {
+                console.log('Deteksi tantangan keamanan Vercel, menunggu verifikasi selesai...');
+            }
+        };
+
+        const checkAndReload = () => {
+            detectVercelChallenge();
+            const panel = document.getElementById('auto-slasher-panel'); // Gunakan ID baru
+            if (!panel || !document.body.contains(panel)) {
+                console.log('Deteksi simulator dihapus, membuat ulang...');
+                window.autoSlasherInitialized = false; // Reset flag
+                const savedScript = localStorage.getItem('autoSlasherScript');
+                if (savedScript) {
+                    try {
+                        eval(savedScript);
+                    } catch (e) {
+                        console.error('Kesalahan saat memulihkan skrip:', e);
+                    }
+                }
+            }
+        };
+        setInterval(checkAndReload, 3000);
+    }
+
+    // Panggil initAutoReloader setelah skrip utama selesai
+    if (document.readyState === 'complete') {
+        initAutoReloader();
+    } else {
+        window.addEventListener('load', initAutoReloader);
+    }
+
+})();
+
+// --- AKHIR SCRIPT MODIFIKASI: DETEKSI & SLASH BUAH ---
