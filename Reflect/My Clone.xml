@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<clone_definition>
+    <properties>
+        <!-- optional. search for same file on different drives -->
+        <!-- Y/N or blank -->
+        <search/>
+        <intelligent_copy>Y</intelligent_copy>
+        <!-- optional. match image id -->
+        <image_id/>
+        <verify_file>Y</verify_file>
+        <delta_copy>Y</delta_copy>
+        <ssd_trim>Y</ssd_trim>
+        <restore_track0>Y</restore_track0>
+        <!-- disk is the 1 based index of the disk -->
+        <!-- id is the disk signature and is used in place of the disk index if specified -->
+        <source_disk id="99C96470-1F84-4060-8070-CC4648D789FC">1</source_disk>
+        <target_disk id="402D38A8-4A7E-431B-AE4A-6C3E6BC60D09">2</target_disk>
+        <!-- Y/N or blank, use the chs values from the source disk. -->
+        <use_source_geometry>N</use_source_geometry>
+        <power level="0" force="N">N</power>
+        <email>
+            <success>
+                <enabled>N</enabled>
+                <attach_log>N</attach_log>
+                <attach_vss_log>N</attach_vss_log>
+                <recipients/>
+                <subject/>
+                <body/>
+            </success>
+            <warning>
+                <enabled>N</enabled>
+                <attach_log>N</attach_log>
+                <attach_vss_log>N</attach_vss_log>
+                <recipients/>
+                <subject/>
+                <body/>
+            </warning>
+            <failure>
+                <enabled>N</enabled>
+                <attach_log>N</attach_log>
+                <attach_vss_log>N</attach_vss_log>
+                <include_cancelled>N</include_cancelled>
+                <recipients/>
+                <subject/>
+                <body/>
+            </failure>
+        </email>
+    </properties>
+    <operation id="1">
+        <!-- operation type is 'copy' or 'delete' -->
+        <type>copy</type>
+        <!-- Delete partition -->
+        <!-- Copy partition -->
+        <copy>
+            <source>
+                <!-- partition is the 1 based index of the partition on the disk -->
+                <!-- or the Volume GUID name with the format '\\?\Volume{GUID}' -->
+                <partition start_sector="2048" end_sector="534527">1</partition>
+            </source>
+            <destination>
+                <!-- partition is the 1 based index of the partition on the disk -->
+                <partition/>
+                <start_sector>2048</start_sector>
+                <end_sector>534527</end_sector>
+                <!-- 1 = Primary, 2 = Active, 3 = Logical -->
+                <partition_type>1</partition_type>
+                <drive_letter type="none"/>
+            </destination>
+        </copy>
+    </operation>
+    <operation id="2">
+        <type>copy</type>
+        <copy>
+            <source>
+                <partition start_sector="534528" end_sector="567295">2</partition>
+            </source>
+            <destination>
+                <partition/>
+                <start_sector>534528</start_sector>
+                <end_sector>567295</end_sector>
+                <partition_type>1</partition_type>
+                <drive_letter type="none"/>
+            </destination>
+        </copy>
+    </operation>
+    <operation id="3">
+        <type>copy</type>
+        <copy>
+            <source>
+                <partition start_sector="567296" end_sector="498069503">3</partition>
+            </source>
+            <destination>
+                <partition/>
+                <start_sector>567296</start_sector>
+                <end_sector>498069503</end_sector>
+                <partition_type>1</partition_type>
+                <drive_letter type="auto"/>
+            </destination>
+        </copy>
+    </operation>
+    <operation id="4">
+        <type>copy</type>
+        <copy>
+            <source>
+                <partition start_sector="498069504" end_sector="500117503">4</partition>
+            </source>
+            <destination>
+                <partition/>
+                <start_sector>498069504</start_sector>
+                <end_sector>500117503</end_sector>
+                <partition_type>1</partition_type>
+                <drive_letter type="none"/>
+            </destination>
+        </copy>
+    </operation>
+</clone_definition>
