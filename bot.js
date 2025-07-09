@@ -876,12 +876,9 @@ function createTradingKeyboard(contractAddress) {
                 { text: '🟢 Buy X SOL', callback_data: `buy_x_sol_${contractAddress}` } // New button
             ],
             [
-                { text: '🔴 Sell 25%', callback_data: `sell_25_${contractAddress}` },
                 { text: '🔴 Sell 50%', callback_data: `sell_50_${contractAddress}` },
+                { text: '🔴 Sell 75%', callback_data: `sell_75_${contractAddress}` },
                 { text: '🔴 Sell 100%', callback_data: `sell_100_${contractAddress}` }
-            ],
-            [
-                { text: '🔴 Sell X Amt', callback_data: `sell_x_amount_${contractAddress}` } // New button for custom sell amount
             ],
             [
                 { text: '📊 Chart (Birdeye)', url: `https://birdeye.so/token/${contractAddress}?chain=solana` },
@@ -908,12 +905,9 @@ function createPnLTradingKeyboard(contractAddress) {
                 { text: '🟢 Buy X SOL', callback_data: `buy_x_sol_${contractAddress}` }
             ],
             [
-                { text: '🔴 Sell 25%', callback_data: `sell_25_${contractAddress}` },
                 { text: '🔴 Sell 50%', callback_data: `sell_50_${contractAddress}` },
+                { text: '🔴 Sell 75%', callback_data: `sell_75_${contractAddress}` },
                 { text: '🔴 Sell 100%', callback_data: `sell_100_${contractAddress}` }
-            ],
-            [
-                { text: '🔴 Sell X Amt', callback_data: `sell_x_amount_${contractAddress}` }
             ],
             [
                 { text: '📊 Chart (Birdeye)', url: `https://birdeye.so/token/${contractAddress}?chain=solana` },
@@ -1083,40 +1077,7 @@ Choose a preset or enter a custom value:`, {
 
         bot.sendMessage(chatId, `Please enter the amount of SOL you want to spend (e.g., 0.05, 1, 2.5) for token \`${targetTokenAddress.substring(0, 8)}...\`.`);
         return;
-    } else if (data.startsWith('sell_x_amount_')) { // NEW: Handle custom "Sell X Amount" button
-        const parts = data.split('_');
-        const targetTokenAddress = parts[3];
-
-        if (!targetTokenAddress || targetTokenAddress.length < 32 || targetTokenAddress.length > 44) {
-            bot.sendMessage(chatId, '❌ Error: Invalid token address in callback for custom sell. Please try analyzing the token again.');
-            return;
-        }
-
-        if (!userWallet) {
-            bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before selling.');
-            return;
-        }
-
-        userData.state = 'awaiting_custom_token_sell_amount';
-        userData.context.targetTokenAddress = targetTokenAddress;
-        await saveUserDataToFile(chatId, userData);
-
-        const tokenData = await new JupiterTokenDataProvider().getComprehensiveTokenData(targetTokenAddress);
-        const currentBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
-        bot.sendMessage(chatId, `You currently hold ${currentBalance.toDecimalPlaces(6).toString()} ${tokenData.symbol || 'tokens'}.
-Please enter the amount of ${tokenData.symbol || 'token'} you want to sell (e.g., 100, 5000, 0.01) for token \`${targetTokenAddress.substring(0, 8)}...\`.`);
-        return;
-    } else if (userData.state === 'awaiting_custom_token_sell_amount') { // NEW: Handler for custom sell amount input
-        userData.state = null; // Clear state
-        const targetTokenAddress = userData.context.targetTokenAddress;
-        userData.context = {}; // Clear context
-        await saveUserDataToFile(chatId, userData);
-
-        if (!targetTokenAddress) {
-            bot.sendMessage(chatId, '❌ Error: Target token for custom sell not found. Please try analyzing the token again.');
-            return;
-        }
-
+      
         const userWallet = userData.wallet?.keypair;
         if (!userWallet) {
             bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before selling.');
