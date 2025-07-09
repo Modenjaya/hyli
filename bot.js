@@ -142,9 +142,9 @@ async function getOrCreateUserData(chatId) {
         if (userData.wallet && userData.wallet.privateKey && !userData.wallet.keypair) {
             try {
                 userData.wallet.keypair = Keypair.fromSecretKey(bs58.decode(userData.wallet.privateKey));
-                console.log(`[DEBUG] Wallet Keypair re-constructed for user ${chatId} in getOrCreateUserData.`);
+                console.log(`[DEBUG] Wallet Keypair successfully reconstructed for ${chatId}.`);
             } catch (e) {
-                console.error(`[ERROR] Failed to re-construct Keypair for user ${chatId} in getOrCreateUserData:`, e);
+                console.error(`[ERROR] Failed to decode private key for user ${chatId} during load:`, e);
                 userData.wallet = null;
             }
         }
@@ -913,7 +913,7 @@ function createPnLTradingKeyboard(contractAddress) {
                 { text: '🔴 Sell 100%', callback_data: `sell_100_${contractAddress}` }
             ],
             [
-                { text: '🔴 Sell X Amt', callback_data: `sell_x_amount_${contractAddress}` }
+                { text: '🔴 Sell X %', callback_data: `sell_x_percent_${contractAddress}` } // Changed from "Amt" to "%"
             ],
             [
                 { text: '📊 Chart (Birdeye)', url: `https://birdeye.so/token/${contractAddress}?chain=solana` },
@@ -925,9 +925,6 @@ function createPnLTradingKeyboard(contractAddress) {
         ]
     };
 }
-
-// Callback query handler for inline buttons
-// ... (your existing code above)
 
 // Callback query handler for inline buttons
 bot.on('callback_query', async (callbackQuery) => {
@@ -955,7 +952,6 @@ bot.on('callback_query', async (callbackQuery) => {
 
             if (saved) {
                 bot.sendMessage(chatId, `✅ New wallet successfully created!\nYour Public Key: \`${newKeypair.publicKey.toBase58()}\`\nYour Private Key: \`${bs58.encode(newKeypair.secretKey)}\`\n\n*WARNING: Your private key is stored on the VPS. This is NOT recommended for high security. Please save your private key in a secure place and delete it from the chat immediately.*`, { parse_mode: 'Markdown' });
-                bot.sendMessage(chatId, 'Choose an option from the main menu:', { reply_markup: createMainMenuKeyboard() });
             } else {
                 bot.sendMessage(chatId, '❌ Failed to create wallet. Please try again.');
             }
@@ -1075,7 +1071,6 @@ Choose a preset or enter a custom value:`, {
         if (!targetTokenAddress || targetTokenAddress.length < 32 || targetTokenAddress.length > 44) {
             console.error(`[ERROR] Invalid token address from "buy_x_sol" callback: "${targetTokenAddress}"`);
             bot.sendMessage(chatId, '❌ Error: Invalid token address in callback for custom buy. Please try analyzing the token again.');
-            return;
         }
 
         if (!userWallet) {
@@ -1090,135 +1085,133 @@ Choose a preset or enter a custom value:`, {
         bot.sendMessage(chatId, `Please enter the amount of SOL you want to spend (e.g., 0.05, 1, 2.5) for token \`${targetTokenAddress.substring(0, 8)}...\`.`);
         return;
     } else if (data.startsWith('sell_x_percent_')) { // Changed callback from sell_x_amount_
-    const parts = data.split('_');
-    const targetTokenAddress = parts[3];
+        const parts = data.split('_');
+        const targetTokenAddress = parts[3];
 
-    if (!targetTokenAddress || targetTokenAddress.length < 32 || targetTokenAddress.length > 44) {
-        bot.sendMessage(chatId, '❌ Error: Invalid token address in callback for custom sell. Please try analyzing the token again.');
-        return;
-    }
+        if (!targetTokenAddress || targetTokenAddress.length < 32 || targetTokenAddress.length > 44) {
+            bot.sendMessage(chatId, '❌ Error: Invalid token address in callback for custom sell. Please try analyzing the token again.');
+            return;
+        }
 
-    if (!userWallet) {
-        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before selling.');
-        return;
-    }
+        if (!userWallet) {
+            bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before selling.');
+            return;
+        }
 
-    // Get current balance and ensure it's a Decimal for comparison and display
-    const tokenData = await new JupiterTokenDataProvider().getComprehensiveTokenData(targetTokenAddress);
-    const rawBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
-    const currentBalance = new Decimal(rawBalance || 0); // Ensure it's a Decimal, default to 0 if null/undefined
+        // Get current balance and ensure it's a Decimal for comparison and display
+        const tokenData = await new JupiterTokenDataProvider().getComprehensiveTokenData(targetTokenAddress);
+        const rawBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
+        const currentBalance = new Decimal(rawBalance || 0); // Ensure it's a Decimal, default to 0 if null/undefined
 
-    if (currentBalance.lte(0)) {
-        bot.sendMessage(chatId, `You currently hold 0 ${tokenData.symbol || 'tokens'} for \`${targetTokenAddress.substring(0, 8)}...\`. You cannot sell.`);
-        return;
-    }
+        if (currentBalance.lte(0)) {
+            bot.sendMessage(chatId, `You currently hold 0 ${tokenData.symbol || 'tokens'} for \`${targetTokenAddress.substring(0, 8)}...\`. You cannot sell.`);
+            return;
+        }
 
-    userData.state = 'awaiting_custom_token_sell_percent'; // Changed state name
-    userData.context.targetTokenAddress = targetTokenAddress;
-    userData.context.currentBalance = currentBalance.toString(); // Store balance as string for context
-    userData.context.tokenSymbol = tokenData.symbol;
-    userData.context.tokenDecimals = tokenData.decimals;
-    await saveUserDataToFile(chatId, userData);
+        userData.state = 'awaiting_custom_token_sell_percent'; // Changed state name
+        userData.context.targetTokenAddress = targetTokenAddress;
+        userData.context.currentBalance = currentBalance.toString(); // Store balance as string for context
+        userData.context.tokenSymbol = tokenData.symbol;
+        userData.context.tokenDecimals = tokenData.decimals;
+        await saveUserDataToFile(chatId, userData);
 
-    bot.sendMessage(chatId, `You currently hold ${currentBalance.toDecimalPlaces(6).toString()} ${tokenData.symbol || 'tokens'}.
+        bot.sendMessage(chatId, `You currently hold ${currentBalance.toDecimalPlaces(6).toString()} ${tokenData.symbol || 'tokens'}.
 Please enter the *percentage* (e.g., 25, 50, 75.5, 100) of ${tokenData.symbol || 'token'} you want to sell for \`${targetTokenAddress.substring(0, 8)}...\`.`);
-    return;
-}
+        return;
     } else if (userData.state === 'awaiting_custom_token_sell_percent') { // Changed state name
-    userData.state = null; // Clear state
-    const targetTokenAddress = userData.context.targetTokenAddress;
-    const storedBalance = new Decimal(userData.context.currentBalance || 0); // Retrieve and convert to Decimal
-    const tokenSymbol = userData.context.tokenSymbol;
-    const tokenDecimals = userData.context.tokenDecimals;
-    userData.context = {}; // Clear context
-    await saveUserDataToFile(chatId, userData);
+        userData.state = null; // Clear state
+        const targetTokenAddress = userData.context.targetTokenAddress;
+        const storedBalance = new Decimal(userData.context.currentBalance || 0); // Retrieve and convert to Decimal
+        const tokenSymbol = userData.context.tokenSymbol;
+        const tokenDecimals = userData.context.tokenDecimals;
+        userData.context = {}; // Clear context
+        await saveUserDataToFile(chatId, userData);
 
-    if (!targetTokenAddress) {
-        bot.sendMessage(chatId, '❌ Error: Target token for custom sell not found. Please try analyzing the token again.');
-        return;
-    }
+        if (!targetTokenAddress) {
+            bot.sendMessage(chatId, '❌ Error: Target token for custom sell not found. Please try analyzing the token again.');
+            return;
+        }
 
-    const userWallet = userData.wallet?.keypair;
-    if (!userWallet) {
-        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before selling.');
-        return;
-    }
-    process.env.WALLET_PUBLIC_KEY = userWallet.publicKey.toBase58();
+        const userWallet = userData.wallet?.keypair;
+        if (!userWallet) {
+            bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before selling.');
+            return;
+        }
+        process.env.WALLET_PUBLIC_KEY = userWallet.publicKey.toBase58();
 
-    let loadingMsgId;
-    try {
-        const sellPercentageInput = new Decimal(text.trim()); // Input now is a percentage
+        let loadingMsgId;
+        try {
+            const sellPercentageInput = new Decimal(text.trim()); // Input now is a percentage
 
-        if (sellPercentageInput.lte(0) || sellPercentageInput.gt(100)) { // Validate percentage
-            throw new Error('Percentage must be between 0.01 and 100.');
-        }
+            if (isNaN(sellPercentageInput) || sellPercentageInput.lte(0) || sellPercentageInput.gt(100)) { // Validate percentage
+                throw new Error('Percentage must be a number between 0.01 and 100.');
+            }
 
-        // Recalculate amount to sell based on percentage
-        const amountToSell = storedBalance.mul(sellPercentageInput.div(100));
+            // Recalculate amount to sell based on percentage
+            const amountToSell = storedBalance.mul(sellPercentageInput.div(100));
 
-        if (amountToSell.lte(0)) {
-            bot.sendMessage(chatId, `Calculated sell amount is zero. You might not have enough token or the percentage is too small.`);
-            return;
-        }
+            if (amountToSell.lte(0)) {
+                bot.sendMessage(chatId, `Calculated sell amount is zero. You might not have enough token or the percentage is too small.`);
+                return;
+            }
 
-        // Convert human-readable amount to raw token units for the swap
-        const rawSellAmount = amountToSell.mul(new Decimal(10).pow(tokenDecimals)).toFixed(0);
+            // Convert human-readable amount to raw token units for the swap
+            const rawSellAmount = amountToSell.mul(new Decimal(10).pow(tokenDecimals)).toFixed(0);
 
-        // Check if the raw sell amount is practically zero after conversion
-        if (new Decimal(rawSellAmount).lte(0) && amountToSell.gt(0)) {
-            bot.sendMessage(chatId, `The calculated sell amount (${amountToSell.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals)} ${tokenSymbol}) is too small to process due to token decimals.`);
-            return;
-        }
+            // Check if the raw sell amount is practically zero after conversion
+            if (new Decimal(rawSellAmount).lte(0) && amountToSell.gt(0)) {
+                bot.sendMessage(chatId, `The calculated sell amount (${amountToSell.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals)} ${tokenSymbol}) is too small to process due to token decimals.`);
+                return;
+            }
 
-        const loadingMsg = await bot.sendMessage(chatId, `🚀 Selling ${sellPercentageInput.toDecimalPlaces(2).toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenSymbol || 'tokens'}) of \`${targetTokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
-        loadingMsgId = loadingMsg.message_id;
+            const loadingMsg = await bot.sendMessage(chatId, `🚀 Selling ${sellPercentageInput.toDecimalPlaces(2).toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenSymbol || 'tokens'}) of \`${targetTokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+            loadingMsgId = loadingMsg.message_id;
 
-        const swapResult = await solanaTrading.executeSwap(
-            { address: targetTokenAddress, symbol: tokenSymbol, decimals: tokenDecimals, amount: rawSellAmount },
-            { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
-            userWallet,
-            userData.settings.priorityFee
-        );
+            const swapResult = await solanaTrading.executeSwap(
+                { address: targetTokenAddress, symbol: tokenSymbol, decimals: tokenDecimals, amount: rawSellAmount },
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
+                userWallet,
+                userData.settings.priorityFee
+            );
 
-        if (swapResult.success) {
-            const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDecimals));
-            const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
+            if (swapResult.success) {
+                const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+                const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
 
-            userData.transactions.push({
-                type: 'sell',
-                tokenAddress: targetTokenAddress,
-                tokenSymbol: tokenSymbol,
-                tokenDecimals: tokenDecimals,
-                solAmount: solReceived.toNumber(),
-                tokenAmount: tokenSold.toNumber(),
-                timestamp: new Date().toISOString()
-            });
-            await saveUserDataToFile(chatId, userData);
+                userData.transactions.push({
+                    type: 'sell',
+                    tokenAddress: targetTokenAddress,
+                    tokenSymbol: tokenSymbol,
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solReceived.toNumber(),
+                    tokenAmount: tokenSold.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
 
-            const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
-            const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
+                const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
 
-            await bot.editMessageText(
-                `✅ *Sell Successful!*
+                await bot.editMessageText(
+                    `✅ *Sell Successful!*
 Sold ${formattedTokenSold} ${tokenSymbol || 'UNKNOWN_TOKEN'} for ${formattedSolReceived} SOL.
 Transaction: \`${swapResult.txHash}\``,
-                { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
-            );
-            await calculateAndDisplayPnL(chatId, targetTokenAddress);
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+                await calculateAndDisplayPnL(chatId, contractAddress);
 
-        } else {
-            await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
-        }
-    } catch (error) {
-        console.error('[ERROR] Error processing custom SOL sell percentage:', error); // Changed log message
-        if (loadingMsgId) {
-            await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
-        } else {
-            bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
-        }
-    }
-    return;
-}
+            } else {
+                await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL sell percentage:', error); // Changed log message
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
+            }
+        }
+        return;
     } else if (data.startsWith('view_pnl_')) {
         const tokenAddress = data.split('_')[2];
         const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
@@ -1320,7 +1313,16 @@ Transaction: \`${swapResult.txHash}\``,
             } else {
                 await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
             }
-        } else if (action === 'sell') {
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (action === 'sell') {
             const percent = new Decimal(value);
             const tokenBalance = await solanaTrading.getTokenBalance(contractAddress, walletToUse.publicKey.toBase58());
 
@@ -1338,21 +1340,21 @@ Transaction: \`${swapResult.txHash}\``,
             }
 
             if (!tokenDataForSell || tokenDataForSell.decimals === undefined || tokenDataForSell.decimals === null) {
-                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId });
+                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
                  return;
             }
 
             const amountToSell = new Decimal(tokenBalance).mul(percent.div(100));
             const minUnit = new Decimal(1).div(new Decimal(10).pow(tokenDataForSell.decimals));
             if (amountToSell.lt(minUnit) && amountToSell.gt(0)) {
-                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId });
+                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
                 return;
             } else if (amountToSell.lte(0)) {
-                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId });
+                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
                 return;
             }
 
-            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
 
             const swapResult = await solanaTrading.executeSwap(
                 { address: contractAddress, symbol: tokenDataForSell.symbol, decimals: tokenDataForSell.decimals, amount: amountToSell.toString() },
@@ -1390,72 +1392,1076 @@ Transaction: \`${swapResult.txHash}\``,
             } else {
                 await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
             }
-        } else if (action === 'refresh') {
-            await bot.editMessageText('🔄 Reloading token analysis...', {
-                chat_id: chatId,
-                message_id: message.message_id
-            });
-            const analysis = await analyzeToken(contractAddress);
-            if (analysis.error) {
-                bot.editMessageText(
-                    `❌ Error during refresh: ${analysis.error}`,
-                    { chat_id: chatId, message_id: message.message_id }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL sell amount:', error);
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (data.startsWith('view_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
+        return;
+    } else if (data.startsWith('refresh_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
+        return;
+    }
+    else if (data === 'close_menu') {
+        await bot.deleteMessage(chatId, message.message_id);
+        bot.sendMessage(chatId, 'Try /start');
+        return;
+    }
+
+
+    // --- Handles actions requiring a wallet (fixed buys/sells, refresh) ---
+    const parts = data.split('_');
+    const action = parts[0];
+    let contractAddress;
+    let value;
+
+    if (action === 'refresh') {
+        contractAddress = parts[1];
+    } else if (action === 'buy' || action === 'sell') {
+        value = parts[1];
+        contractAddress = parts[2];
+    } else {
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
+    if (!contractAddress || contractAddress.length < 32 || contractAddress.length > 44) {
+        console.error(`[ERROR] Invalid contract address extracted from callback data: "${contractAddress}" for action "${action}"`);
+        bot.sendMessage(chatId, '❌ Invalid token address in callback data. Please try analyzing the token again from scratch.');
+        return;
+    }
+    contractAddress = contractAddress.trim();
+
+
+    if (!userWallet) {
+        console.warn(`[WARN] User ${chatId} attempted action ${action} without a loaded wallet.`);
+        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before proceeding.');
+        return;
+    }
+
+    const walletToUse = userWallet;
+    process.env.WALLET_PUBLIC_KEY = walletToUse.publicKey.toBase58();
+
+    const SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+    let loadingMsgId = message.message_id; // Gunakan ID pesan callback untuk editing
+
+    try {
+        if (action === 'buy') {
+            const solAmount = new Decimal(value);
+
+            await bot.editMessageText(`🚀 Buying ${solAmount.toString()} SOL for token \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
+                { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
+                userWallet,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(contractAddress);
+                const solSpent = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(9));
+                const tokenDecimals = tokenMetadata.decimals || 0;
+                const tokenReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+
+                userData.transactions.push({
+                    type: 'buy',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenMetadata.symbol || 'UNKNOWN',
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solSpent.toNumber(),
+                    tokenAmount: tokenReceived.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenReceived = tokenReceived.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolSpent = solSpent.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Buy Successful!*
+Bought ${formattedTokenReceived} ${tokenMetadata.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolSpent} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
                 );
+
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (action === 'sell') {
+            const percent = new Decimal(value);
+            const tokenBalance = await solanaTrading.getTokenBalance(contractAddress, walletToUse.publicKey.toBase58());
+
+            if (tokenBalance === 0) {
+                bot.editMessageText(`You don't have token \`${contractAddress.substring(0, 8)}...\` in your wallet.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
                 return;
             }
-            const metadata = analysis.metadata;
-            const displaySupply = metadata.supply instanceof Decimal && metadata.decimals !== null ? metadata.supply.div(new Decimal(10).pow(metadata.decimals)).toDecimalPlaces(metadata.decimals > 6 ? 6 : metadata.decimals, Decimal.ROUND_DOWN).toLocaleString() : 'N/A';
-            const displayPrice = metadata.price instanceof Decimal ? `$${metadata.price.toDecimalPlaces(9)}` : 'N/A';
-            const displayVolume = metadata.volume instanceof Decimal ? `$${metadata.volume.toDecimalPlaces(2).toLocaleString()}` : 'N/A';
-            const displayMarketCap = metadata.marketCap instanceof Decimal ? `$${metadata.marketCap.toDecimalPlaces(2).toLocaleString()}` : 'N/A';
-            const displayLiquidity = metadata.liquidity instanceof Decimal ? `$${metadata.liquidity.toDecimalPlaces(2).toLocaleString()}` : 'N/A';
-            const displayFDV = metadata.fdv instanceof Decimal ? `$${metadata.fdv.toDecimalPlaces(2).toLocaleString()}` : 'N/A';
 
-            let auditInfo = '';
-            if (metadata.mintAuthorityDisabled !== null) {
-                auditInfo += `*Mint Disabled:* ${metadata.mintAuthorityDisabled ? '✅ Yes' : '❌ No'}\n`;
-            }
-            if (metadata.freezeAuthorityDisabled !== null) {
-                auditInfo += `*Freeze Disabled:* ${metadata.freezeAuthorityDisabled ? '✅ Yes' : '❌ No'}\n`;
-            }
-            if (metadata.launchpad !== null) {
-                auditInfo += `*Launchpad:* ${metadata.launchpad}\n`;
-            }
-            if (metadata.holderCount !== null) {
-                auditInfo += `*Holders:* ${metadata.holderCount.toLocaleString()}\n`;
+            const jupiterDataProvider = new JupiterTokenDataProvider();
+            let tokenDataForSell = null;
+            try {
+                tokenDataForSell = await jupiterDataProvider.getComprehensiveTokenData(contractAddress);
+            } catch (e) {
+                console.error('[ERROR] Failed to get token data for sell transaction:', e);
             }
 
-            const updatedMessage = `
-🪙 *TOKEN ANALYSIS* (Updated)
+            if (!tokenDataForSell || tokenDataForSell.decimals === undefined || tokenDataForSell.decimals === null) {
+                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                 return;
+            }
 
-*Name:* ${metadata.name}
-*Symbol:* ${metadata.symbol}
-*Contract:* \`${analysis.address}\`
-*Decimals:* ${metadata.decimals !== null ? metadata.decimals : 'N/A'}
-*Data Source:* ${metadata.source}
-*Price (USD):* ${displayPrice}
-*24h Volume:* ${displayVolume}
-*Market Cap:* ${displayMarketCap}
-*Liquidity:* ${displayLiquidity}
-*FDV:* ${displayFDV}
-*Total Supply:* ${displaySupply}
-${metadata.verified ? '✅ *Verified*' : '⚠️ *Unverified*'}
-${auditInfo}
-${metadata.tags && metadata.tags.length > 0 ? `*Tags:* ${metadata.tags.join(', ')}` : ''}
+            const amountToSell = new Decimal(tokenBalance).mul(percent.div(100));
+            const minUnit = new Decimal(1).div(new Decimal(10).pow(tokenDataForSell.decimals));
+            if (amountToSell.lt(minUnit) && amountToSell.gt(0)) {
+                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            } else if (amountToSell.lte(0)) {
+                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
 
-💰 *Ready to trade?*
-            `;
-            bot.editMessageText(updatedMessage, {
-                chat_id: chatId,
-                message_id: message.message_id,
-                parse_mode: 'Markdown',
-                reply_markup: createTradingKeyboard(analysis.address)
-            });
+            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: contractAddress, symbol: tokenDataForSell.symbol, decimals: tokenDataForSell.decimals, amount: amountToSell.toString() },
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
+                walletToUse,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDataForSell.decimals));
+                const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
+
+                userData.transactions.push({
+                    type: 'sell',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenDataForSell.symbol,
+                    tokenDecimals: tokenDataForSell.decimals,
+                    solAmount: solReceived.toNumber(),
+                    tokenAmount: tokenSold.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDataForSell.decimals > 6 ? 6 : tokenDataForSell.decimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Sell Successful!*
+Sold ${formattedTokenSold} ${tokenDataForSell.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolReceived} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing fixed percentage sell:', error); // Changed log message
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
+            }
         }
-    } catch (error) {
-        console.error('[ERROR] Callback query error:', error);
-        bot.sendMessage(chatId, `❌ An error occurred while processing the request: ${error.message}`);
+        return;
+    } else if (data.startsWith('view_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
+        return;
+    } else if (data.startsWith('refresh_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
+        return;
     }
+    else if (data === 'close_menu') {
+        await bot.deleteMessage(chatId, message.message_id);
+        bot.sendMessage(chatId, 'Try /start');
+        return;
+    }
+
+
+    // --- Handles actions requiring a wallet (fixed buys/sells, refresh) ---
+    const parts = data.split('_');
+    const action = parts[0];
+    let contractAddress;
+    let value;
+
+    if (action === 'refresh') {
+        contractAddress = parts[1];
+    } else if (action === 'buy' || action === 'sell') {
+        value = parts[1];
+        contractAddress = parts[2];
+    } else {
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
+    if (!contractAddress || contractAddress.length < 32 || contractAddress.length > 44) {
+        console.error(`[ERROR] Invalid contract address extracted from callback data: "${contractAddress}" for action "${action}"`);
+        bot.sendMessage(chatId, '❌ Invalid token address in callback data. Please try analyzing the token again from scratch.');
+        return;
+    }
+    contractAddress = contractAddress.trim();
+
+
+    if (!userWallet) {
+        console.warn(`[WARN] User ${chatId} attempted action ${action} without a loaded wallet.`);
+        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before proceeding.');
+        return;
+    }
+
+    const walletToUse = userWallet;
+    process.env.WALLET_PUBLIC_KEY = walletToUse.publicKey.toBase58();
+
+    const SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+    let loadingMsgId = message.message_id; // Gunakan ID pesan callback untuk editing
+
+    try {
+        if (action === 'buy') {
+            const solAmount = new Decimal(value);
+
+            await bot.editMessageText(`🚀 Buying ${solAmount.toString()} SOL for token \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
+                { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
+                userWallet,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(contractAddress);
+                const solSpent = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(9));
+                const tokenDecimals = tokenMetadata.decimals || 0;
+                const tokenReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+
+                userData.transactions.push({
+                    type: 'buy',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenMetadata.symbol || 'UNKNOWN',
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solSpent.toNumber(),
+                    tokenAmount: tokenReceived.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenReceived = tokenReceived.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolSpent = solSpent.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Buy Successful!*
+Bought ${formattedTokenReceived} ${tokenMetadata.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolSpent} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (action === 'sell') {
+            const percent = new Decimal(value);
+            const tokenBalance = await solanaTrading.getTokenBalance(contractAddress, walletToUse.publicKey.toBase58());
+
+            if (tokenBalance === 0) {
+                bot.editMessageText(`You don't have token \`${contractAddress.substring(0, 8)}...\` in your wallet.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            const jupiterDataProvider = new JupiterTokenDataProvider();
+            let tokenDataForSell = null;
+            try {
+                tokenDataForSell = await jupiterDataProvider.getComprehensiveTokenData(contractAddress);
+            } catch (e) {
+                console.error('[ERROR] Failed to get token data for sell transaction:', e);
+            }
+
+            if (!tokenDataForSell || tokenDataForSell.decimals === undefined || tokenDataForSell.decimals === null) {
+                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                 return;
+            }
+
+            const amountToSell = new Decimal(tokenBalance).mul(percent.div(100));
+            const minUnit = new Decimal(1).div(new Decimal(10).pow(tokenDataForSell.decimals));
+            if (amountToSell.lt(minUnit) && amountToSell.gt(0)) {
+                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            } else if (amountToSell.lte(0)) {
+                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: contractAddress, symbol: tokenDataForSell.symbol, decimals: tokenDataForSell.decimals, amount: amountToSell.toString() },
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
+                walletToUse,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDataForSell.decimals));
+                const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
+
+                userData.transactions.push({
+                    type: 'sell',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenDataForSell.symbol,
+                    tokenDecimals: tokenDataForSell.decimals,
+                    solAmount: solReceived.toNumber(),
+                    tokenAmount: tokenSold.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDataForSell.decimals > 6 ? 6 : tokenDataForSell.decimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Sell Successful!*
+Sold ${formattedTokenSold} ${tokenDataForSell.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolReceived} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing fixed percentage sell:', error); // Changed log message
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
+            }
+        }
+        return;
+    } else if (data.startsWith('view_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
+        return;
+    } else if (data.startsWith('refresh_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
+        return;
+    }
+    else if (data === 'close_menu') {
+        await bot.deleteMessage(chatId, message.message_id);
+        bot.sendMessage(chatId, 'Try /start');
+        return;
+    }
+
+
+    // --- Handles actions requiring a wallet (fixed buys/sells, refresh) ---
+    const parts = data.split('_');
+    const action = parts[0];
+    let contractAddress;
+    let value;
+
+    if (action === 'refresh') {
+        contractAddress = parts[1];
+    } else if (action === 'buy' || action === 'sell') {
+        value = parts[1];
+        contractAddress = parts[2];
+    } else {
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
+    if (!contractAddress || contractAddress.length < 32 || contractAddress.length > 44) {
+        console.error(`[ERROR] Invalid contract address extracted from callback data: "${contractAddress}" for action "${action}"`);
+        bot.sendMessage(chatId, '❌ Invalid token address in callback data. Please try analyzing the token again from scratch.');
+        return;
+    }
+    contractAddress = contractAddress.trim();
+
+
+    if (!userWallet) {
+        console.warn(`[WARN] User ${chatId} attempted action ${action} without a loaded wallet.`);
+        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before proceeding.');
+        return;
+    }
+
+    const walletToUse = userWallet;
+    process.env.WALLET_PUBLIC_KEY = walletToUse.publicKey.toBase58();
+
+    const SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+    let loadingMsgId = message.message_id; // Gunakan ID pesan callback untuk editing
+
+    try {
+        if (action === 'buy') {
+            const solAmount = new Decimal(value);
+
+            await bot.editMessageText(`🚀 Buying ${solAmount.toString()} SOL for token \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
+                { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
+                userWallet,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(contractAddress);
+                const solSpent = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(9));
+                const tokenDecimals = tokenMetadata.decimals || 0;
+                const tokenReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+
+                userData.transactions.push({
+                    type: 'buy',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenMetadata.symbol || 'UNKNOWN',
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solSpent.toNumber(),
+                    tokenAmount: tokenReceived.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenReceived = tokenReceived.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolSpent = solSpent.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Buy Successful!*
+Bought ${formattedTokenReceived} ${tokenMetadata.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolSpent} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (action === 'sell') {
+            const percent = new Decimal(value);
+            const tokenBalance = await solanaTrading.getTokenBalance(contractAddress, walletToUse.publicKey.toBase58());
+
+            if (tokenBalance === 0) {
+                bot.editMessageText(`You don't have token \`${contractAddress.substring(0, 8)}...\` in your wallet.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            const jupiterDataProvider = new JupiterTokenDataProvider();
+            let tokenDataForSell = null;
+            try {
+                tokenDataForSell = await jupiterDataProvider.getComprehensiveTokenData(contractAddress);
+            } catch (e) {
+                console.error('[ERROR] Failed to get token data for sell transaction:', e);
+            }
+
+            if (!tokenDataForSell || tokenDataForSell.decimals === undefined || tokenDataForSell.decimals === null) {
+                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                 return;
+            }
+
+            const amountToSell = new Decimal(tokenBalance).mul(percent.div(100));
+            const minUnit = new Decimal(1).div(new Decimal(10).pow(tokenDataForSell.decimals));
+            if (amountToSell.lt(minUnit) && amountToSell.gt(0)) {
+                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            } else if (amountToSell.lte(0)) {
+                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: contractAddress, symbol: tokenDataForSell.symbol, decimals: tokenDataForSell.decimals, amount: amountToSell.toString() },
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
+                walletToUse,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDataForSell.decimals));
+                const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
+
+                userData.transactions.push({
+                    type: 'sell',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenDataForSell.symbol,
+                    tokenDecimals: tokenDataForSell.decimals,
+                    solAmount: solReceived.toNumber(),
+                    tokenAmount: tokenSold.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDataForSell.decimals > 6 ? 6 : tokenDataForSell.decimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Sell Successful!*
+Sold ${formattedTokenSold} ${tokenDataForSell.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolReceived} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing fixed percentage sell:', error); // Changed log message
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
+            }
+        }
+        return;
+    } else if (data.startsWith('view_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
+        return;
+    } else if (data.startsWith('refresh_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
+        return;
+    }
+    else if (data === 'close_menu') {
+        await bot.deleteMessage(chatId, message.message_id);
+        bot.sendMessage(chatId, 'Try /start');
+        return;
+    }
+
+
+    // --- Handles actions requiring a wallet (fixed buys/sells, refresh) ---
+    const parts = data.split('_');
+    const action = parts[0];
+    let contractAddress;
+    let value;
+
+    if (action === 'refresh') {
+        contractAddress = parts[1];
+    } else if (action === 'buy' || action === 'sell') {
+        value = parts[1];
+        contractAddress = parts[2];
+    } else {
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
+    if (!contractAddress || contractAddress.length < 32 || contractAddress.length > 44) {
+        console.error(`[ERROR] Invalid contract address extracted from callback data: "${contractAddress}" for action "${action}"`);
+        bot.sendMessage(chatId, '❌ Invalid token address in callback data. Please try analyzing the token again from scratch.');
+        return;
+    }
+    contractAddress = contractAddress.trim();
+
+
+    if (!userWallet) {
+        console.warn(`[WARN] User ${chatId} attempted action ${action} without a loaded wallet.`);
+        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before proceeding.');
+        return;
+    }
+
+    const walletToUse = userWallet;
+    process.env.WALLET_PUBLIC_KEY = walletToUse.publicKey.toBase58();
+
+    const SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+    let loadingMsgId = message.message_id; // Gunakan ID pesan callback untuk editing
+
+    try {
+        if (action === 'buy') {
+            const solAmount = new Decimal(value);
+
+            await bot.editMessageText(`🚀 Buying ${solAmount.toString()} SOL for token \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
+                { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
+                userWallet,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(contractAddress);
+                const solSpent = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(9));
+                const tokenDecimals = tokenMetadata.decimals || 0;
+                const tokenReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+
+                userData.transactions.push({
+                    type: 'buy',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenMetadata.symbol || 'UNKNOWN',
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solSpent.toNumber(),
+                    tokenAmount: tokenReceived.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenReceived = tokenReceived.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolSpent = solSpent.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Buy Successful!*
+Bought ${formattedTokenReceived} ${tokenMetadata.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolSpent} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (action === 'sell') {
+            const percent = new Decimal(value);
+            const tokenBalance = await solanaTrading.getTokenBalance(contractAddress, walletToUse.publicKey.toBase58());
+
+            if (tokenBalance === 0) {
+                bot.editMessageText(`You don't have token \`${contractAddress.substring(0, 8)}...\` in your wallet.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            const jupiterDataProvider = new JupiterTokenDataProvider();
+            let tokenDataForSell = null;
+            try {
+                tokenDataForSell = await jupiterDataProvider.getComprehensiveTokenData(contractAddress);
+            } catch (e) {
+                console.error('[ERROR] Failed to get token data for sell transaction:', e);
+            }
+
+            if (!tokenDataForSell || tokenDataForSell.decimals === undefined || tokenDataForSell.decimals === null) {
+                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                 return;
+            }
+
+            const amountToSell = new Decimal(tokenBalance).mul(percent.div(100));
+            const minUnit = new Decimal(1).div(new Decimal(10).pow(tokenDataForSell.decimals));
+            if (amountToSell.lt(minUnit) && amountToSell.gt(0)) {
+                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            } else if (amountToSell.lte(0)) {
+                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: contractAddress, symbol: tokenDataForSell.symbol, decimals: tokenDataForSell.decimals, amount: amountToSell.toString() },
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
+                walletToUse,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDataForSell.decimals));
+                const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
+
+                userData.transactions.push({
+                    type: 'sell',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenDataForSell.symbol,
+                    tokenDecimals: tokenDataForSell.decimals,
+                    solAmount: solReceived.toNumber(),
+                    tokenAmount: tokenSold.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDataForSell.decimals > 6 ? 6 : tokenDataForSell.decimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Sell Successful!*
+Sold ${formattedTokenSold} ${tokenDataForSell.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolReceived} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing fixed percentage sell:', error); // Changed log message
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
+            }
+        }
+        return;
+    } else if (data.startsWith('view_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
+        return;
+    } else if (data.startsWith('refresh_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
+        return;
+    }
+    else if (data === 'close_menu') {
+        await bot.deleteMessage(chatId, message.message_id);
+        bot.sendMessage(chatId, 'Try /start');
+        return;
+    }
+
+
+    // --- Handles actions requiring a wallet (fixed buys/sells, refresh) ---
+    const parts = data.split('_');
+    const action = parts[0];
+    let contractAddress;
+    let value;
+
+    if (action === 'refresh') {
+        contractAddress = parts[1];
+    } else if (action === 'buy' || action === 'sell') {
+        value = parts[1];
+        contractAddress = parts[2];
+    } else {
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
+    if (!contractAddress || contractAddress.length < 32 || contractAddress.length > 44) {
+        console.error(`[ERROR] Invalid contract address extracted from callback data: "${contractAddress}" for action "${action}"`);
+        bot.sendMessage(chatId, '❌ Invalid token address in callback data. Please try analyzing the token again from scratch.');
+        return;
+    }
+    contractAddress = contractAddress.trim();
+
+
+    if (!userWallet) {
+        console.warn(`[WARN] User ${chatId} attempted action ${action} without a loaded wallet.`);
+        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before proceeding.');
+        return;
+    }
+
+    const walletToUse = userWallet;
+    process.env.WALLET_PUBLIC_KEY = walletToUse.publicKey.toBase58();
+
+    const SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+    let loadingMsgId = message.message_id; // Gunakan ID pesan callback untuk editing
+
+    try {
+        if (action === 'buy') {
+            const solAmount = new Decimal(value);
+
+            await bot.editMessageText(`🚀 Buying ${solAmount.toString()} SOL for token \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
+                { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
+                userWallet,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(contractAddress);
+                const solSpent = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(9));
+                const tokenDecimals = tokenMetadata.decimals || 0;
+                const tokenReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+
+                userData.transactions.push({
+                    type: 'buy',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenMetadata.symbol || 'UNKNOWN',
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solSpent.toNumber(),
+                    tokenAmount: tokenReceived.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenReceived = tokenReceived.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolSpent = solSpent.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Buy Successful!*
+Bought ${formattedTokenReceived} ${tokenMetadata.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolSpent} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else if (action === 'sell') {
+            const percent = new Decimal(value);
+            const tokenBalance = await solanaTrading.getTokenBalance(contractAddress, walletToUse.publicKey.toBase58());
+
+            if (tokenBalance === 0) {
+                bot.editMessageText(`You don't have token \`${contractAddress.substring(0, 8)}...\` in your wallet.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            const jupiterDataProvider = new JupiterTokenDataProvider();
+            let tokenDataForSell = null;
+            try {
+                tokenDataForSell = await jupiterDataProvider.getComprehensiveTokenData(contractAddress);
+            } catch (e) {
+                console.error('[ERROR] Failed to get token data for sell transaction:', e);
+            }
+
+            if (!tokenDataForSell || tokenDataForSell.decimals === undefined || tokenDataForSell.decimals === null) {
+                 bot.editMessageText(`Failed to get token decimals for ${contractAddress}.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                 return;
+            }
+
+            const amountToSell = new Decimal(tokenBalance).mul(percent.div(100));
+            const minUnit = new Decimal(1).div(new Decimal(10).pow(tokenDataForSell.decimals));
+            if (amountToSell.lt(minUnit) && amountToSell.gt(0)) {
+                bot.editMessageText(`The amount (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) is too small to sell.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            } else if (amountToSell.lte(0)) {
+                bot.editMessageText(`Calculated sell amount is zero. You might not have enough token or the percentage is too small.`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+                return;
+            }
+
+            await bot.editMessageText(`🚀 Selling ${percent.toString()}% (${amountToSell.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol}) of \`${contractAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: contractAddress, symbol: tokenDataForSell.symbol, decimals: tokenDataForSell.decimals, amount: amountToSell.toString() },
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 },
+                walletToUse,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenSold = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(tokenDataForSell.decimals));
+                const solReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(9));
+
+                userData.transactions.push({
+                    type: 'sell',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenDataForSell.symbol,
+                    tokenDecimals: tokenDataForSell.decimals,
+                    solAmount: solReceived.toNumber(),
+                    tokenAmount: tokenSold.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenSold = tokenSold.toDecimalPlaces(tokenDataForSell.decimals > 6 ? 6 : tokenDataForSell.decimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolReceived = solReceived.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Sell Successful!*
+Sold ${formattedTokenSold} ${tokenDataForSell.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolReceived} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing fixed percentage sell:', error); // Changed log message
+            if (loadingMsgId) {
+                await bot.editMessageText(`❌ Invalid percentage or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId }); // Changed error message
+            } else {
+                bot.sendMessage(chatId, `❌ Invalid percentage or an error occurred: ${error.message}`); // Changed error message
+            }
+        }
+        return;
+    } else if (data.startsWith('view_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
+        return;
+    } else if (data.startsWith('refresh_pnl_')) {
+        const tokenAddress = data.split('_')[2];
+        await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
+        await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
+        return;
+    }
+    else if (data === 'close_menu') {
+        await bot.deleteMessage(chatId, message.message_id);
+        bot.sendMessage(chatId, 'Try /start');
+        return;
+    }
+
+
+    // --- Handles actions requiring a wallet (fixed buys/sells, refresh) ---
+    const parts = data.split('_');
+    const action = parts[0];
+    let contractAddress;
+    let value;
+
+    if (action === 'refresh') {
+        contractAddress = parts[1];
+    } else if (action === 'buy' || action === 'sell') {
+        value = parts[1];
+        contractAddress = parts[2];
+    } else {
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
+    if (!contractAddress || contractAddress.length < 32 || contractAddress.length > 44) {
+        console.error(`[ERROR] Invalid contract address extracted from callback data: "${contractAddress}" for action "${action}"`);
+        bot.sendMessage(chatId, '❌ Invalid token address in callback data. Please try analyzing the token again from scratch.');
+        return;
+    }
+    contractAddress = contractAddress.trim();
+
+
+    if (!userWallet) {
+        console.warn(`[WARN] User ${chatId} attempted action ${action} without a loaded wallet.`);
+        bot.sendMessage(chatId, 'You do not have a wallet set up. Please use /start to create or import your wallet before proceeding.');
+        return;
+    }
+
+    const walletToUse = userWallet;
+    process.env.WALLET_PUBLIC_KEY = walletToUse.publicKey.toBase58();
+
+    const SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+    let loadingMsgId = message.message_id; // Gunakan ID pesan callback untuk editing
+
+    try {
+        if (action === 'buy') {
+            const solAmount = new Decimal(value);
+
+            await bot.editMessageText(`🚀 Buying ${solAmount.toString()} SOL for token \`${contractAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' });
+
+            const swapResult = await solanaTrading.executeSwap(
+                { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
+                { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
+                userWallet,
+                userData.settings.priorityFee
+            );
+
+            if (swapResult.success) {
+                const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(contractAddress);
+                const solSpent = new Decimal(swapResult.inputAmountResult).div(new Decimal(10).pow(9));
+                const tokenDecimals = tokenMetadata.decimals || 0;
+                const tokenReceived = new Decimal(swapResult.outputAmountResult).div(new Decimal(10).pow(tokenDecimals));
+
+                userData.transactions.push({
+                    type: 'buy',
+                    tokenAddress: contractAddress,
+                    tokenSymbol: tokenMetadata.symbol || 'UNKNOWN',
+                    tokenDecimals: tokenDecimals,
+                    solAmount: solSpent.toNumber(),
+                    tokenAmount: tokenReceived.toNumber(),
+                    timestamp: new Date().toISOString()
+                });
+                await saveUserDataToFile(chatId, userData);
+
+                const formattedTokenReceived = tokenReceived.toDecimalPlaces(tokenDecimals > 6 ? 6 : tokenDecimals, Decimal.ROUND_DOWN).toString();
+                const formattedSolSpent = solSpent.toDecimalPlaces(9).toString();
+
+                await bot.editMessageText(
+                    `✅ *Buy Successful!*
+Sold ${formattedTokenReceived} ${tokenMetadata.symbol || 'UNKNOWN_TOKEN'} for ${formattedSolSpent} SOL.
+Transaction: \`${swapResult.txHash}\``,
+                    { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
+                );
+
+                await calculateAndDisplayPnL(chatId, contractAddress);
+
+            } else {
+                await bot.editMessageText(`❌ Failed to buy token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
+            }
+        } catch (error) {
+            console.error('[ERROR] Error processing custom SOL buy amount:', error);
+            if (loadingMsgId) { // Jika ada pesan loading, edit pesan tersebut
+                await bot.editMessageText(`❌ Invalid amount or an error occurred: ${error.message}`, { chat_id: chatId, message_id: loadingMsgId });
+            } else { // Jika tidak ada pesan loading, kirim pesan baru
+                bot.sendMessage(chatId, `❌ Invalid amount or an error occurred: ${error.message}`);
+            }
+        }
+        return;
+    } else { // This is the 'else' part of 'if (action === 'buy')' and 'else if (action === 'sell')'
+        console.error(`[ERROR] Unhandled callback data pattern: ${data}`);
+        bot.sendMessage(chatId, '❌ An unknown action was requested. Please try again or use /start.');
+        return;
+    }
+
 });
 
 
