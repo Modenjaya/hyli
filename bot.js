@@ -927,6 +927,9 @@ function createPnLTradingKeyboard(contractAddress) {
 }
 
 // Callback query handler for inline buttons
+// ... (your existing code above)
+
+// Callback query handler for inline buttons
 bot.on('callback_query', async (callbackQuery) => {
     const message = callbackQuery.message;
     const chatId = message.chat.id;
@@ -992,9 +995,12 @@ bot.on('callback_query', async (callbackQuery) => {
             for (const tokenAddress of ownedTokenAddresses) {
                 try {
                     const tokenBalance = await solanaTrading.getTokenBalance(tokenAddress, userWallet.publicKey.toBase58());
-                    if (tokenBalance > 0) {
+                    // Ensure tokenBalance is a Decimal for display
+                    const displayTokenBalance = new Decimal(tokenBalance || 0);
+
+                    if (displayTokenBalance.gt(0)) {
                         const tokenMetadata = await new JupiterTokenDataProvider().getComprehensiveTokenData(tokenAddress);
-                        tokenBalancesMessage += `- \`${tokenMetadata.symbol}\` (${tokenAddress.substring(0, 8)}...): ${tokenBalance.toFixed(6)} ${tokenMetadata.symbol}\n`;
+                        tokenBalancesMessage += `- \`${tokenMetadata.symbol}\` (${tokenAddress.substring(0, 8)}...): ${displayTokenBalance.toFixed(6)} ${tokenMetadata.symbol}\n`;
                         hasTokens = true;
                     }
                 } catch (e) {
@@ -1083,7 +1089,7 @@ Choose a preset or enter a custom value:`, {
 
         bot.sendMessage(chatId, `Please enter the amount of SOL you want to spend (e.g., 0.05, 1, 2.5) for token \`${targetTokenAddress.substring(0, 8)}...\`.`);
         return;
-    } else if (data.startsWith('sell_x_amount_')) { // NEW: Handle custom "Sell X Amount" button
+    } else if (data.startsWith('sell_x_amount_')) {
         const parts = data.split('_');
         const targetTokenAddress = parts[3];
 
@@ -1097,16 +1103,24 @@ Choose a preset or enter a custom value:`, {
             return;
         }
 
+        // Get current balance and ensure it's a Decimal for comparison and display
+        const tokenData = await new JupiterTokenDataProvider().getComprehensiveTokenData(targetTokenAddress);
+        const rawBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
+        const currentBalance = new Decimal(rawBalance || 0); // Ensure it's a Decimal, default to 0 if null/undefined
+
+        if (currentBalance.lte(0)) {
+            bot.sendMessage(chatId, `You currently hold 0 ${tokenData.symbol || 'tokens'} for \`${targetTokenAddress.substring(0, 8)}...\`. You cannot sell.`);
+            return;
+        }
+
         userData.state = 'awaiting_custom_token_sell_amount';
         userData.context.targetTokenAddress = targetTokenAddress;
         await saveUserDataToFile(chatId, userData);
 
-        const tokenData = await new JupiterTokenDataProvider().getComprehensiveTokenData(targetTokenAddress);
-        const currentBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
         bot.sendMessage(chatId, `You currently hold ${currentBalance.toDecimalPlaces(6).toString()} ${tokenData.symbol || 'tokens'}.
 Please enter the amount of ${tokenData.symbol || 'token'} you want to sell (e.g., 100, 5000, 0.01) for token \`${targetTokenAddress.substring(0, 8)}...\`.`);
         return;
-    } else if (userData.state === 'awaiting_custom_token_sell_amount') { // NEW: Handler for custom sell amount input
+    } else if (userData.state === 'awaiting_custom_token_sell_amount') {
         userData.state = null; // Clear state
         const targetTokenAddress = userData.context.targetTokenAddress;
         userData.context = {}; // Clear context
@@ -1136,12 +1150,14 @@ Please enter the amount of ${tokenData.symbol || 'token'} you want to sell (e.g.
                 throw new Error(`Failed to get token decimals for ${targetTokenAddress}.`);
             }
 
-            const currentBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
-            if (sellAmountInput.gt(new Decimal(currentBalance))) {
+            const rawBalance = await solanaTrading.getTokenBalance(targetTokenAddress, userWallet.publicKey.toBase58());
+            const currentBalance = new Decimal(rawBalance || 0); // Ensure it's a Decimal for comparison
+
+            if (sellAmountInput.gt(currentBalance)) { // Compare Decimal objects
                 throw new Error(`Insufficient token balance. You have ${currentBalance.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol || 'tokens'}.`);
             }
 
-            // Convert human-readable amount to raw token units
+            // Convert human-readable amount to raw token units for the swap
             const rawSellAmount = sellAmountInput.mul(new Decimal(10).pow(tokenDataForSell.decimals)).toFixed(0);
 
             const loadingMsg = await bot.sendMessage(chatId, `🚀 Selling ${sellAmountInput.toDecimalPlaces(6).toString()} ${tokenDataForSell.symbol || 'tokens'} for \`${targetTokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
@@ -1178,7 +1194,7 @@ Sold ${formattedTokenSold} ${tokenDataForSell.symbol || 'UNKNOWN_TOKEN'} for ${f
 Transaction: \`${swapResult.txHash}\``,
                     { chat_id: chatId, message_id: loadingMsgId, parse_mode: 'Markdown' }
                 );
-                await calculateAndDisplayPnL(chatId, targetTokenAddress);
+                await calculateAndDisplayPnL(chatId, contractAddress);
 
             } else {
                 await bot.editMessageText(`❌ Failed to sell token: ${swapResult.error}`, { chat_id: chatId, message_id: loadingMsgId });
@@ -1197,15 +1213,13 @@ Transaction: \`${swapResult.txHash}\``,
         const loadingMsg = await bot.sendMessage(chatId, `Calculating PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { parse_mode: 'Markdown' });
         await calculateAndDisplayPnL(chatId, tokenAddress, loadingMsg.message_id);
         return;
-    } else if (data.startsWith('refresh_pnl_')) { // NEW: Handle PnL Refresh button
+    } else if (data.startsWith('refresh_pnl_')) {
         const tokenAddress = data.split('_')[2];
-        // Edit the current message to show loading state
         await bot.editMessageText(`🔄 Refreshing PnL for \`${tokenAddress.substring(0, 8)}...\`...`, { chat_id: chatId, message_id: message.message_id, parse_mode: 'Markdown' });
-        // Pass the original messageId so calculateAndDisplayPnL edits it
         await calculateAndDisplayPnL(chatId, tokenAddress, message.message_id);
         return;
     }
-    else if (data === 'close_menu') { // NEW: Handle Close button
+    else if (data === 'close_menu') {
         await bot.deleteMessage(chatId, message.message_id);
         bot.sendMessage(chatId, 'Try /start');
         return;
@@ -1259,7 +1273,7 @@ Transaction: \`${swapResult.txHash}\``,
             const swapResult = await solanaTrading.executeSwap(
                 { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9, amount: solAmount.toString() },
                 { address: contractAddress, symbol: 'UNKNOWN_TOKEN', decimals: 0 },
-                walletToUse,
+                userWallet,
                 userData.settings.priorityFee
             );
 
